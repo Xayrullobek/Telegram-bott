@@ -74,7 +74,6 @@ if __name__ == "__main__":
     main()
 from telegram import ReplyKeyboardMarkup
 from telegram.ext import MessageHandler, Filters
-
 # Asosiy menyuni chiqarish
 def main_menu(update, context):
     keyboard = [
