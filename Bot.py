@@ -19,7 +19,7 @@ from telegram.ext import (
 )
 
 # 🔑 TOKEN va ADMIN ID
-TOKEN = "7577643640:AAF7wvo9l6Cg4XCFjCKN8X_wL7cYqCe_0WI"
+TOKEN = "7518059950:AAHk86-0Qv9jljSh79VB8WRB3sw8BZZHvBg"
 ADMIN_IDS = [6988170724]  # Sizning admin ID
 
 # 📌 Logging
