@@ -72,3 +72,56 @@ def main():
 
 if __name__ == "__main__":
     main()
+from telegram import ReplyKeyboardMarkup
+from telegram.ext import MessageHandler, Filters
+
+# Asosiy menyuni chiqarish
+def main_menu(update, context):
+    keyboard = [
+        ["🛒 Buyurtma"],
+        ["📊 Hisobot"],
+        ["📞 Aloqa"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    update.message.reply_text("📍 Asosiy menyu:", reply_markup=reply_markup)
+
+# Telefon raqam qabul qilingandan keyin asosiy menyuga o‘tkazamiz
+def contact_handler(update, context):
+    chat_id = update.message.chat_id
+    contact = update.message.contact
+
+    clients = load_clients()
+    clients[str(chat_id)] = {
+        "phone": contact.phone_number,
+        "name": update.message.chat.first_name,
+        "debt": 0
+    }
+    save_clients(clients)
+
+    update.message.reply_text("✅ Siz mijoz sifatida ro‘yxatdan o‘tdingiz!")
+    main_menu(update, context)
+
+# Tugmalarni qayta ishlash
+def menu_handler(update, context):
+    text = update.message.text
+
+    if text == "🛒 Buyurtma":
+        update.message.reply_text("Siz Buyurtma bo‘limini tanladingiz. (Keyingi bosqichda ichki bo‘limlar qo‘shamiz)")
+    elif text == "📊 Hisobot":
+        update.message.reply_text("Siz Hisobot bo‘limini tanladingiz.")
+    elif text == "📞 Aloqa":
+        update.message.reply_text("Siz Aloqa bo‘limini tanladingiz.")
+    else:
+        update.message.reply_text("❓ Menyu tugmalaridan birini tanlang.")
+
+def main():
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.contact, contact_handler))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, menu_handler))
+
+    updater.start_polling()
+    updater.idle()
