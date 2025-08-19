@@ -9,11 +9,11 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# 🔑 BOT TOKEN (siz bergan token shu yerda turibdi)
-TOKEN = "7491021612:AAGmR1EmLfhV_LhmdEy3w1Xid7_yY9M7hC0"
+# 🔑 TOKENINGIZNI shu yerga yozing
+TOKEN = "7518059950:AAHk86-0Qv9jljSh79VB8WRB3sw8BZZHvBg"
 
-# 📌 ADMIN ID (siz bergan ID shu yerda turibdi)
-ADMIN_ID = 6258656774
+# 📌 ADMIN ID
+ADMIN_ID = 6988170724   # o‘zingizning telegram ID’ingizni qo‘ying
 
 # Narxlar
 PRICES = {
@@ -48,6 +48,7 @@ async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     user = query.from_user
+    # Bu yerda user ma’lumotlari bazaga saqlanishi mumkin (id, username, full_name)
     text = (
         f"✅ Ro‘yxatdan o‘tdingiz!\n\n"
         f"👤 Sizning ID: {user.id}\n"
@@ -104,7 +105,7 @@ async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_name = document.file_name
     user = update.message.from_user
 
-    # Fayl haqida adminni xabardor qilish
+    # Fayl qabul qilingani haqida adminlarga xabar
     await context.bot.send_message(
         ADMIN_ID,
         f"📥 Yangi fayl!\n"
@@ -129,3 +130,88 @@ def main():
 
 if __name__ == "__main__":
     main()
+    import re
+
+# --- Fayl qabul qilish va hisoblash ---
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    data = load_data()
+
+    if not update.message.document:
+        await update.message.reply_text("❌ Iltimos, TIFF yoki JPG fayl yuboring.")
+        return
+
+    file_name = update.message.document.file_name.lower()
+
+    # Fayl nomidan o‘lchamlarni ajratamiz (masalan: "2x5", "3x7 4ta")
+    size_match = re.search(r"(\d+)[xX](\d+)", file_name)
+    count_match = re.search(r"(\d+)\s*ta", file_name)
+
+    count = int(count_match.group(1)) if count_match else 1
+
+    # --- Buyurtma turi aniqlash ---
+    order_type = None
+    if "banner" in file_name and "qora" not in file_name:
+        order_type = "banner"
+    elif "qora" in file_name:
+        order_type = "qora_banner"
+    elif "beklit" in file_name:
+        order_type = "beklit"
+    elif "matoviy" in file_name:
+        order_type = "matoviy_orakal"
+    elif "orakal" in file_name:
+        order_type = "orakal"
+    elif "setka" in file_name:
+        order_type = "setka"
+
+    if not order_type:
+        await update.message.reply_text("❌ Buyurtma turini aniqlab bo‘lmadi. Fayl nomini tekshiring.")
+        return
+
+    # --- Hisoblash ---
+    area = 0
+    if order_type in ["banner", "qora_banner", "beklit"]:
+        if size_match:
+            en = int(size_match.group(1))
+            boy = int(size_match.group(2))
+            area = en * boy * count
+    elif order_type in ["orakal", "matoviy_orakal", "setka"]:
+        if size_match:
+            uzunlik = int(size_match.group(2))  # "1x3" → uzunlik = 3
+            koef = 1.0
+            if "1.07" in file_name:
+                koef = 1.07
+            elif "1.27" in file_name:
+                koef = 1.27
+            elif "1.52" in file_name:
+                koef = 1.52
+            area = uzunlik * koef * count
+
+    if area == 0:
+        await update.message.reply_text("❌ O‘lcham yoki ko‘paytirish soni noto‘g‘ri.")
+        return
+
+    price_per_m2 = data["prices"][order_type]
+    total_price = int(area * price_per_m2)
+
+    # Buyurtmani saqlash
+    order = {
+        "user_id": user_id,
+        "type": order_type,
+        "size": area,
+        "count": count,
+        "price": total_price,
+        "date": str(datetime.date.today()),
+        "file_name": file_name
+    }
+    data["orders"].append(order)
+    save_data(data)
+
+    # Foydalanuvchiga javob
+    await update.message.reply_text(
+        f"✅ Faylingiz qabul qilindi!\n\n"
+        f"📂 Buyurtma turi: {order_type}\n"
+        f"📏 Kvadrat: {area:.2f} m²\n"
+        f"💵 Narx: {total_price:,} so‘m\n",
+        parse_mode="Markdown"
+    )
