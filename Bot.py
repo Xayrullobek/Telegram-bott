@@ -1,82 +1,224 @@
-import logging import re import os import sqlite3 from datetime import datetime from PIL import Image
+# =========================================
+# IMPORTS
+# =========================================
+import logging
+import sqlite3
+from datetime import datetime
 
-from telegram import ( Update, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, InputFile ) from telegram.ext import ( Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters )
-
-=============================
-
-CONFIG
-
-=============================
-
-BOT_TOKEN = "7518059950:AAHk86-0Qv9jljSh79VB8WRB3sw8BZZHvBg" ADMIN_ID = 6988170724 DB_FILE = "bot.db"
-
-Narhlar (standart)
-
-default_prices = { "banner": 35000, "qora_banner": 30000, "orakal_107": 25000, "orakal_127": 27000, "orakal_152": 30000, "orakal_kichik": 20000, "matoviy_orakal": 32000, "setka": 28000, "beklit": 40000 }
-
-=============================
-
-DATABASE
-
-=============================
-
-def init_db(): conn = sqlite3.connect(DB_FILE) c = conn.cursor() c.execute(""" CREATE TABLE IF NOT EXISTS users ( user_id INTEGER PRIMARY KEY, phone TEXT, is_admin INTEGER DEFAULT 0 )""") c.execute(""" CREATE TABLE IF NOT EXISTS orders ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, type TEXT, width REAL, height REAL, count INTEGER, area REAL, price REAL, created_at TEXT )""") c.execute(""" CREATE TABLE IF NOT EXISTS prices ( user_id INTEGER, type TEXT, price REAL, PRIMARY KEY(user_id, type) )""") conn.commit() conn.close()
-
-=============================
-
-HELPERS
-
-=============================
-
-def get_price(user_id, order_type): conn = sqlite3.connect(DB_FILE) c = conn.cursor() c.execute("SELECT price FROM prices WHERE user_id=? AND type=?", (user_id, order_type)) row = c.fetchone() conn.close() if row: return row[0] return default_prices.get(order_type, 0)
-
-def save_order(user_id, order_type, width, height, count, area, price): conn = sqlite3.connect(DB_FILE) c = conn.cursor() c.execute("INSERT INTO orders (user_id,type,width,height,count,area,price,created_at) VALUES (?,?,?,?,?,?,?,?)", (user_id, order_type, width, height, count, area, price, datetime.now().strftime("%Y-%m-%d %H:%M"))) conn.commit() conn.close()
-
-def parse_filename(filename): pattern = r"(\d+(?:[.,]\d+)?)x(\d+(?:[.,]\d+)?)(?:[^\d]*(\d+))?" match = re.search(pattern, filename) if match: width = float(match.group(1).replace(",", ".")) height = float(match.group(2).replace(",", ".")) count = int(match.group(3)) if match.group(3) else 1 return width, height, count return None, None, 1
-
-def image_to_meters(file_path): try: with Image.open(file_path) as img: dpi = img.info.get('dpi', (72, 72))[0] width_px, height_px = img.size width_m = width_px / dpi * 0.0254 height_m = height_px / dpi * 0.0254 return round(width_m, 2), round(height_m, 2) except: return None, None
-
-=============================
-
-HANDLERS
-
-=============================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE): user_id = update.effective_user.id conn = sqlite3.connect(DB_FILE) c = conn.cursor() c.execute("INSERT OR IGNORE INTO users (user_id, phone, is_admin) VALUES (?, ?, ?)", (user_id, None, 1 if user_id == ADMIN_ID else 0)) conn.commit() conn.close()
-
-text = (
-    "Assalomu alaykum! 👋 Bizning botimiz eng yaxshi reklama xizmatlarini taqdim etadi.\n\n"
-    "📌 *Eslatma*: Fayl nomida o‘lcham va soni yozilmagan bo‘lsa, natijada hisobda xato chiqishi mumkin.\n"
+from telegram import (
+    Update, KeyboardButton, ReplyKeyboardMarkup,
+    InlineKeyboardMarkup, InlineKeyboardButton
 )
-btn = [[KeyboardButton("📱 Telefon raqamni yuborish", request_contact=True)]]
-await update.message.reply_text(text, reply_markup=ReplyKeyboardMarkup(btn, resize_keyboard=True))
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    filters, CallbackContext, CallbackQueryHandler, ConversationHandler
+)
 
-async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE): phone = update.message.contact.phone_number user_id = update.effective_user.id conn = sqlite3.connect(DB_FILE) c = conn.cursor() c.execute("UPDATE users SET phone=? WHERE user_id=?", (phone, user_id)) conn.commit() conn.close() await show_menu(update, context)
+# =========================================
+# CONFIG
+# =========================================
+BOT_TOKEN = "7518059950:AAHk86-OQv9j1jSh79VB8WRXXXXXXXX"
+ADMIN_ID = 6988170724   # admin ID
 
-async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE): user_id = update.effective_user.id conn = sqlite3.connect(DB_FILE) c = conn.cursor() c.execute("SELECT is_admin FROM users WHERE user_id=?", (user_id,)) is_admin = c.fetchone()[0] conn.close()
+# Standart narxlar
+default_prices = {
+    "banner": 35000,
+    "orakal": 45000,
+    "setka": 30000,
+    "beklit": 50000,
+}
 
-buttons = [
-    ["📝 Buyurtma"],
-    ["📊 Hisobot"],
-    ["📞 Aloqa"]
-]
-if is_admin:
-    buttons.append(["⚙️ Admin panel"])
-await update.message.reply_text("Menyudan tanlang:", reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True))
+# =========================================
+# DATABASE
+# =========================================
+DB_FILE = "orders.db"
 
-=============================
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS orders
+        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        section TEXT,
+        size TEXT,
+        files_count INTEGER,
+        price REAL,
+        created_at TEXT)''')
 
-MAIN
+    cursor.execute('''CREATE TABLE IF NOT EXISTS prices
+        (section TEXT PRIMARY KEY,
+        price REAL)''')
 
-=============================
+    for section, price in default_prices.items():
+        cursor.execute("INSERT OR IGNORE INTO prices (section, price) VALUES (?, ?)", (section, price))
 
-def main(): init_db() app = Application.builder().token(BOT_TOKEN).build()
+    conn.commit()
+    conn.close()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
+def get_price(section):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT price FROM prices WHERE section=?", (section,))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else default_prices.get(section, 0)
 
-logging.basicConfig(level=logging.INFO)
-app.run_polling()
+def update_price(section, new_price):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("REPLACE INTO prices (section, price) VALUES (?, ?)", (section, new_price))
+    conn.commit()
+    conn.close()
 
-if name == "main": main()
+# =========================================
+# CONVERSATION STATES
+# =========================================
+SECTION, SIZE, FILES = range(3)
 
+# =========================================
+# USER HANDLERS
+# =========================================
+async def start(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    if user_id == ADMIN_ID:
+        keyboard = [
+            [KeyboardButton("📝 Buyurtma berish")],
+            [KeyboardButton("📊 Admin panel")]
+        ]
+    else:
+        keyboard = [[KeyboardButton("📝 Buyurtma berish")]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text("Xush kelibsiz! Kerakli bo‘limni tanlang 👇", reply_markup=reply_markup)
+
+async def order(update: Update, context: CallbackContext):
+    sections = [
+        [InlineKeyboardButton("Banner", callback_data="order_banner")],
+        [InlineKeyboardButton("Orakal", callback_data="order_orakal")],
+        [InlineKeyboardButton("Setka", callback_data="order_setka")],
+        [InlineKeyboardButton("Beklit", callback_data="order_beklit")]
+    ]
+    reply_markup = InlineKeyboardMarkup(sections)
+    await update.message.reply_text("Qaysi bo‘lim uchun buyurtma berasiz?", reply_markup=reply_markup)
+
+async def choose_section(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    section = query.data.replace("order_", "")
+    context.user_data["section"] = section
+    await query.message.reply_text(f"{section.capitalize()} uchun o‘lcham kiriting (masalan: 3x6):")
+    return SIZE
+
+async def choose_size(update: Update, context: CallbackContext):
+    context.user_data["size"] = update.message.text
+    await update.message.reply_text("Nechta fayl kerak?")
+    return FILES
+
+async def choose_files(update: Update, context: CallbackContext):
+    try:
+        files_count = int(update.message.text)
+    except ValueError:
+        await update.message.reply_text("Iltimos, son kiriting.")
+        return FILES
+
+    section = context.user_data["section"]
+    size = context.user_data["size"]
+    price_per_file = get_price(section)
+    total_price = price_per_file * files_count
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO orders (user_id, section, size, files_count, price, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                   (update.message.from_user.id, section, size, files_count, total_price, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+
+    await update.message.reply_text(
+        f"✅ Buyurtma qabul qilindi!\n\n"
+        f"Bo‘lim: {section}\n"
+        f"O‘lcham: {size}\n"
+        f"Fayl soni: {files_count}\n"
+        f"Umumiy narx: {total_price} so‘m"
+    )
+    return ConversationHandler.END
+
+# =========================================
+# ADMIN HANDLERS
+# =========================================
+async def admin_panel(update: Update, context: CallbackContext):
+    if update.message.from_user.id != ADMIN_ID:
+        return
+    sections = [
+        [InlineKeyboardButton("📋 Buyurtmalar", callback_data="admin_orders")],
+        [InlineKeyboardButton("💰 Narxlarni sozlash", callback_data="admin_prices")]
+    ]
+    reply_markup = InlineKeyboardMarkup(sections)
+    await update.message.reply_text("Admin panel:", reply_markup=reply_markup)
+
+async def admin_orders(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, section, size, files_count, price, created_at FROM orders ORDER BY created_at DESC LIMIT 5")
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await query.message.reply_text("Hali buyurtmalar yo‘q.")
+    else:
+        text = "📋 So‘nggi buyurtmalar:\n\n"
+        for row in rows:
+            text += f"#{row[0]} | {row[1]} | {row[2]} | {row[3]} ta | {row[4]} so‘m | {row[5][:16]}\n"
+        await query.message.reply_text(text)
+
+async def admin_prices(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+
+    text = "💰 Hozirgi narxlar:\n\n"
+    for section, price in default_prices.items():
+        text += f"{section.capitalize()}: {get_price(section)} so‘m\n"
+    text += "\nNarxni o‘zgartirish uchun: /setprice banner 40000"
+
+    await query.message.reply_text(text)
+
+async def set_price(update: Update, context: CallbackContext):
+    if update.message.from_user.id != ADMIN_ID:
+        return
+    try:
+        section, new_price = context.args
+        new_price = int(new_price)
+        update_price(section, new_price)
+        await update.message.reply_text(f"✅ {section} narxi {new_price} so‘m qilib yangilandi.")
+    except:
+        await update.message.reply_text("❌ To‘g‘ri format: /setprice banner 40000")
+
+# =========================================
+# MAIN
+# =========================================
+def main():
+    init_db()
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(choose_section, pattern="^order_")],
+        states={
+            SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_size)],
+            FILES: [MessageHandler(filters.TEXT & ~filters.COMMAND, choose_files)],
+        },
+        fallbacks=[],
+    )
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.Regex("📝 Buyurtma berish"), order))
+    application.add_handler(MessageHandler(filters.Regex("📊 Admin panel"), admin_panel))
+    application.add_handler(CallbackQueryHandler(admin_orders, pattern="^admin_orders$"))
+    application.add_handler(CallbackQueryHandler(admin_prices, pattern="^admin_prices$"))
+    application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("setprice", set_price))
+
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
