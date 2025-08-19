@@ -1,95 +1,70 @@
-from telegram import ReplyKeyboardMarkup, KeyboardButton, Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 import os
-import json
+import telebot
+from telebot import types
+from flask import Flask
 
-TOKEN = os.getenv("BOT_TOKEN")
+# 🔑 Tokeningiz
+TOKEN = "7518059950:AAHk86-0Qv9jljSh79VB8WRB3sw8BZZHvBg"
+bot = telebot.TeleBot(TOKEN)
 
-DB_FILE = "clients.json"
-if not os.path.exists(DB_FILE):
-    with open(DB_FILE, "w") as f:
-        json.dump({}, f)
-
-def load_clients():
-    with open(DB_FILE, "r") as f:
-        return json.load(f)
-
-def save_clients(clients):
-    with open(DB_FILE, "w") as f:
-        json.dump(clients, f)
-
-# --- ASOSIY MENYU ---
-def main_menu(update, context):
-    keyboard = [
-        ["🛒 Buyurtma"],
-        ["📊 Hisobot"],
-        ["📞 Aloqa"]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text="📍 Asosiy menyu:",
-        reply_markup=reply_markup
+# === Start komandasi ===
+@bot.message_handler(commands=['start'])
+def start_message(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = types.KeyboardButton("📦 Buyurtma")
+    btn2 = types.KeyboardButton("📊 Hisobot")
+    btn3 = types.KeyboardButton("📞 Aloqa")
+    markup.add(btn1, btn2, btn3)
+    bot.send_message(
+        message.chat.id,
+        "👋 Salom! Botga xush kelibsiz!\nQuyidagi bo‘limlardan birini tanlang 👇",
+        reply_markup=markup
     )
 
-# --- START ---
-def start(update: Update, context: CallbackContext):
-    chat_id = update.message.chat_id
-    clients = load_clients()
+# === Buyurtma bo‘limi ===
+@bot.message_handler(func=lambda message: message.text == "📦 Buyurtma")
+def order_menu(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = types.KeyboardButton("🖼 Banner")
+    btn2 = types.KeyboardButton("⬛ Qora banner")
+    btn3 = types.KeyboardButton("📐 Orakal")
+    btn4 = types.KeyboardButton("🌫 Matoviy orakal")
+    btn5 = types.KeyboardButton("#️⃣ Setka")
+    btn6 = types.KeyboardButton("💡 Beklit")
+    back = types.KeyboardButton("🔙 Orqaga")
+    markup.add(btn1, btn2, btn3, btn4, btn5, btn6, back)
+    bot.send_message(message.chat.id, "📦 Buyurtma bo‘limi. Kerakli turini tanlang 👇", reply_markup=markup)
 
-    if str(chat_id) in clients:
-        update.message.reply_text("Siz ro‘yxatdan o‘tib bo‘lgansiz ✅")
-        main_menu(update, context)
-        return
+# === Hisobot bo‘limi ===
+@bot.message_handler(func=lambda message: message.text == "📊 Hisobot")
+def report_menu(message):
+    bot.send_message(message.chat.id, "📊 Sizning hisobotlaringiz bu yerda chiqadi (hozircha tayyor emas).")
 
-    button = [[KeyboardButton("📱 Telefon raqamni yuborish", request_contact=True)]]
-    reply_markup = ReplyKeyboardMarkup(button, resize_keyboard=True, one_time_keyboard=True)
+# === Aloqa bo‘limi ===
+@bot.message_handler(func=lambda message: message.text == "📞 Aloqa")
+def contact_menu(message):
+    bot.send_message(message.chat.id, "📞 Admin bilan bog‘lanish uchun: @username")
 
-    update.message.reply_text(
-        "👋 Salom! Ro‘yxatdan o‘tish uchun telefon raqamingizni yuboring 👇",
-        reply_markup=reply_markup
-    )
+# === Orqaga tugmasi ===
+@bot.message_handler(func=lambda message: message.text == "🔙 Orqaga")
+def back_to_main(message):
+    start_message(message)
 
-# --- TELEFON RAQAM QABUL QILISH ---
-def contact_handler(update, context):
-    chat_id = update.message.chat_id
-    contact = update.message.contact
+# === Flask server (Render uchun) ===
+app = Flask(__name__)
 
-    clients = load_clients()
-    clients[str(chat_id)] = {
-        "phone": contact.phone_number,
-        "name": update.message.chat.first_name,
-        "debt": 0
-    }
-    save_clients(clients)
+@app.route('/')
+def home():
+    return "✅ Bot ishlayapti (Render Web Service uchun)."
 
-    update.message.reply_text("✅ Siz mijoz sifatida ro‘yxatdan o‘tdingiz!")
-    main_menu(update, context)
-
-# --- MENYU BOSILGANDA ---
-def menu_handler(update, context):
-    text = update.message.text
-
-    if text == "🛒 Buyurtma":
-        update.message.reply_text("Siz Buyurtma bo‘limini tanladingiz.")
-    elif text == "📊 Hisobot":
-        update.message.reply_text("Siz Hisobot bo‘limini tanladingiz.")
-    elif text == "📞 Aloqa":
-        update.message.reply_text("Siz Aloqa bo‘limini tanladingiz.")
-    else:
-        update.message.reply_text("❓ Menyu tugmalaridan birini tanlang.")
-
-# --- MAIN ---
-def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
-
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.contact, contact_handler))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, menu_handler))
-
-    updater.start_polling()
-    updater.idle()
+# === Botni polling qilish ===
+def run_bot():
+    bot.polling(none_stop=True)
 
 if __name__ == "__main__":
-    main()
+    import threading
+    t = threading.Thread(target=run_bot)
+    t.start()
+    
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
