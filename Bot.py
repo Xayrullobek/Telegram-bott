@@ -1,73 +1,164 @@
-import logging from aiogram import Bot, Dispatcher, types from aiogram.utils import executor from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton from aiogram.contrib.fsm_storage.memory import MemoryStorage import re
+import logging import re from aiogram import Bot, Dispatcher, executor, types from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-Token va Admin ID
+=============================
 
-BOT_TOKEN = "7518059950:AAHk86-0Qv9jljSh79VB8WRB3sw8BZZHvBg" ADMIN_ID = 6988170724
+TOKEN VA ADMIN ID
 
-Logging
+=============================
+
+API_TOKEN = "7518059950:AAHk86-0Qv9jljSh79VB8WRB3sw8BZZHvBg" ADMIN_ID = 6988170724
+
+=============================
+
+LOGGING
+
+=============================
 
 logging.basicConfig(level=logging.INFO)
 
-Bot va Dispatcher
+=============================
 
-bot = Bot(token=BOT_TOKEN) storage = MemoryStorage() dp = Dispatcher(bot, storage=storage)
+BOT VA DISPATCHER
 
-Narxlar (m² uchun)
+=============================
 
-PRICES = { "banner": 45000, "orakal": 55000, "setka": 55000, "beklit": 65000, "matoviy_orakal": 55000, "qora_banner": 55000 }
+bot = Bot(token=API_TOKEN) dp = Dispatcher(bot)
 
-Foydalanuvchilar ma’lumotlari
+=============================
 
-users = {}
+NARHLAR
 
-Start komandasi
+=============================
 
-@dp.message_handler(commands=["start"]) async def start_cmd(message: types.Message): text = ( "👋 Assalomu alaykum! Bu bot orqali buyurtmalarni berishingiz mumkin.\n\n" "📌 Eslatma:\n" "Fayllar faqat JPG yoki TIFF shaklida qabul qilinadi.\n" "Fayl nomida o‘lcham va soni ko‘rsatilishi shart. Aks holda faylingiz qabul qilinmaydi!" ) markup = InlineKeyboardMarkup().add( InlineKeyboardButton("📋 Ro‘yxatdan o‘tish", callback_data="register") ) await message.answer(text, reply_markup=markup)
+prices = { "banner": 45000, "qora_banner": 55000, "orakal": 55000, "mat_orakal": 55000, "setka": 55000, "beklit": 65000 }
 
-Ro‘yxatdan o‘tish
+Orakal koeffitsiyentlari
 
-@dp.callback_query_handler(lambda c: c.data == "register") async def register_user(callback_query: types.CallbackQuery): user = callback_query.from_user users[user.id] = { "id": user.id, "name": user.full_name, "username": user.username, "phone": None } # Asosiy menyu markup = InlineKeyboardMarkup(row_width=2) markup.add( InlineKeyboardButton("🛒 Buyurtma", callback_data="buyurtma"), InlineKeyboardButton("📊 Hisobot", callback_data="hisobot"), InlineKeyboardButton("📞 Aloqa", callback_data="aloqa") ) await bot.send_message(user.id, "✅ Ro‘yxatdan o‘tdingiz!", reply_markup=markup)
+orakal_coeff = { "1.07": 1.07, "1.27": 1.27, "1.52": 1.52, "kichik": 1.0  # faqat uzunlik × eni (klassik formula emas) }
 
-Asosiy menyu tugmalar
+=============================
 
-@dp.callback_query_handler(lambda c: c.data in ["buyurtma", "hisobot", "aloqa"]) async def main_menu(callback_query: types.CallbackQuery): cid = callback_query.data if cid == "buyurtma": markup = InlineKeyboardMarkup(row_width=2) markup.add( InlineKeyboardButton("📌 Banner", callback_data="banner"), InlineKeyboardButton("📌 Orakal", callback_data="orakal"), InlineKeyboardButton("📌 Setka", callback_data="setka"), InlineKeyboardButton("📌 Beklit", callback_data="beklit"), InlineKeyboardButton("📌 Matoviy Orakal", callback_data="matoviy_orakal"), InlineKeyboardButton("📌 Qora Banner", callback_data="qora_banner") ) await bot.send_message(callback_query.from_user.id, "Buyurtma turini tanlang:", reply_markup=markup) elif cid == "hisobot": await bot.send_message(callback_query.from_user.id, "📊 Sizning buyurtmalaringiz bo‘yicha hisobot hozircha yo‘q.") elif cid == "aloqa": await bot.send_message(callback_query.from_user.id, "📞 Admin bilan bog‘lanish: @your_admin_username")
+KLAVIATURA
 
-Buyurtma bo‘limlari
+=============================
 
-@dp.callback_query_handler(lambda c: c.data in ["banner", "orakal", "setka", "beklit", "matoviy_orakal", "qora_banner"]) async def order_section(callback_query: types.CallbackQuery): section = callback_query.data await bot.send_message( callback_query.from_user.id, f"📤 {section.upper()} bo‘limi tanlandi. Fayllarni yuboring (bir nechta fayl tashlashingiz mumkin)." )
+main_menu = ReplyKeyboardMarkup(resize_keyboard=True) main_menu.add("📦 Buyurtma", "📊 Hisobot", "📞 Aloqa")
 
-Fayl qabul qilish
+order_menu = ReplyKeyboardMarkup(resize_keyboard=True) order_menu.add("🖼 Banner", "⬛ Qora Banner") order_menu.add("🔵 Orakal", "✨ Matoviy Orakal") order_menu.add("🕸 Setka", "💡 Beklit") order_menu.add("⬅️ Orqaga")
 
-@dp.message_handler(content_types=["document", "photo"]) async def handle_file(message: types.Message): user_id = message.from_user.id if user_id not in users: await message.answer("❌ Avval ro‘yxatdan o‘ting.") return
+orakal_menu = ReplyKeyboardMarkup(resize_keyboard=True) orakal_menu.add("1.07", "1.27", "1.52", "Kichik") orakal_menu.add("⬅️ Orqaga")
 
-filename = message.document.file_name if message.document else ""
+=============================
+
+MALUMOTLARNI SAQLASH
+
+=============================
+
+user_orders = {}  # {user_id: [ { 'type':..., 'size':..., 'count':..., 'area':..., 'price':... } ] }
+
+=============================
+
+START
+
+=============================
+
+@dp.message_handler(commands=['start']) async def start_cmd(message: types.Message): await message.answer( "Salom! 👋\n\nEslatma:\nYuborilayotgan fayl jpg yoki tiff bo'lishi shart. Fayl nomida o'lcham (eni×uzunlik) va soni yozilishi kerak. Agar qoida bajarilmasa fayl qabul qilinmaydi!", parse_mode="Markdown", reply_markup=main_menu )
+
+=============================
+
+BUYURTMA MENYU
+
+=============================
+
+@dp.message_handler(lambda m: m.text == "📦 Buyurtma") async def order_handler(message: types.Message): await message.answer("Buyurtma turini tanlang:", reply_markup=order_menu)
+
+@dp.message_handler(lambda m: m.text == "🔵 Orakal") async def orakal_handler(message: types.Message): await message.answer("Orakal bo'limini tanlang:", reply_markup=orakal_menu)
+
+=============================
+
+FAYL QABUL QILISH
+
+=============================
+
+@dp.message_handler(content_types=['document', 'photo']) async def file_handler(message: types.Message): user_id = message.from_user.id
+
+# Fayl nomini olish
+if message.document:
+    filename = message.document.file_name
+else:
+    filename = message.caption or ""
+
+# Regex: orakal 100x200 2ta
 match = re.search(r"(\d+)x(\d+)(?:\s*(\d+)ta)?", filename)
 if not match:
-    await message.answer("❌ Fayl nomida o‘lcham yoki soni ko‘rsatilmagan.")
+    await message.answer("❌ Fayl nomida o'lcham (eni×uzunlik) va soni yozilishi kerak!")
     return
 
-eni = int(match.group(1)) / 100  # santimetr → metr
-boyi = int(match.group(2)) / 100
-soni = int(match.group(3)) if match.group(3) else 1
+width = int(match.group(1)) / 100   # santimetr → metr
+length = int(match.group(2)) / 100  # santimetr → metr
+count = int(match.group(3)) if match.group(3) else 1
 
-# Kvadrat metr
-kvadrat = eni * boyi * soni
+# Hozircha turini filename’dan aniqlaymiz
+file_type = "banner" if "banner" in filename.lower() else "orakal"
 
-# Bo‘limni aniqlash
-section = "banner"
-for sec in PRICES.keys():
-    if sec in filename.lower():
-        section = sec
-        break
+# Hisoblash
+if file_type in ["banner", "qora_banner", "beklit"]:
+    area = width * length * count
+    price = area * prices[file_type]
+else:  # orakal/matoviy/setka
+    # default coefficient
+    coeff = 1.27
+    for key in orakal_coeff:
+        if key in filename:
+            coeff = orakal_coeff[key]
+            break
+    area = length * coeff * count
+    price = area * prices[file_type]
 
-summa = kvadrat * PRICES[section]
+# Saqlash
+if user_id not in user_orders:
+    user_orders[user_id] = []
+user_orders[user_id].append({
+    "type": file_type,
+    "size": f"{width*100}x{length*100}",
+    "count": count,
+    "area": round(area, 2),
+    "price": round(price, 2)
+})
 
-await message.answer(
-    f"✅ Fayl qabul qilindi!\n"
-    f"📂 Nomi: {filename}\n"
-    f"📐 Hajmi: {eni:.2f}m x {boyi:.2f}m x {soni} dona = {kvadrat:.2f} m²\n"
-    f"💰 Narx: {summa:,.0f} so‘m"
-)
+await message.answer(f"✅ Fayl qabul qilindi!\n📐 Maydon: {round(area,2)} m²\n💰 Narx: {round(price,2)} so'm")
 
-if name == "main": executor.start_polling(dp, skip_updates=True)
+=============================
+
+HISOBOT
+
+=============================
+
+@dp.message_handler(lambda m: m.text == "📊 Hisobot") async def report_handler(message: types.Message): user_id = message.from_user.id if user_id not in user_orders or not user_orders[user_id]: await message.answer("Siz hali buyurtma bermagansiz!") return
+
+text = "📊 Buyurtmalar tarixi:\n\n"
+total = 0
+for order in user_orders[user_id]:
+    text += f"➡️ {order['type']} | {order['size']} | {order['count']} dona | {order['area']} m² | {order['price']} so'm\n"
+    total += order['price']
+text += f"\nJami: {round(total,2)} so'm"
+await message.answer(text)
+
+=============================
+
+ADMIN PANEL
+
+=============================
+
+@dp.message_handler(commands=['admin']) async def admin_cmd(message: types.Message): if message.from_user.id != ADMIN_ID: return text = "🔑 Admin panel:\n/narh [tur] [yangi_narh] — narhni o'zgartirish\n/addadmin [id] — yangi admin qo'shish" await message.answer(text)
+
+@dp.message_handler(commands=['narh']) async def change_price(message: types.Message): if message.from_user.id != ADMIN_ID: return args = message.text.split() if len(args) != 3: await message.answer("❌ Format: /narh banner 50000") return typ, val = args[1], int(args[2]) if typ in prices: prices[typ] = val await message.answer(f"✅ {typ} narhi {val} so'm qilib o'zgartirildi!") else: await message.answer("❌ Noto'g'ri tur!")
+
+=============================
+
+RUN
+
+=============================
+
+if name == 'main': executor.start_polling(dp, skip_updates=True)
 
